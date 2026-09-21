@@ -159,7 +159,7 @@ class _PanicoScreenState extends State<PanicoScreen> {
           .put(
             Uri.parse('http://localhost:3001/alertas/$_alertaId'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'mensaje': texto}),
+            body: jsonEncode({'mensaje': texto, 'creado_por': widget.correo}),
           )
           .timeout(const Duration(seconds: 10));
 
@@ -212,7 +212,10 @@ class _PanicoScreenState extends State<PanicoScreen> {
           .put(
             Uri.parse('http://localhost:3001/alertas/$_alertaId'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'foto': base64Encode(bytes)}),
+            body: jsonEncode({
+              'foto': base64Encode(bytes),
+              'creado_por': widget.correo,
+            }),
           )
           .timeout(const Duration(seconds: 20));
 

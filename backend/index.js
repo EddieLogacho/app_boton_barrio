@@ -117,10 +117,15 @@ app.post('/eventos', async (req, res) => {
   }
 });
 
-// Ruta para obtener todas las alertas
+// Ruta para obtener todas las alertas (con el total de comentarios de cada una)
 app.get('/alertas', async (req, res) => {
   try {
-    const resultado = await pool.query('SELECT * FROM alertas ORDER BY fecha DESC');
+    const resultado = await pool.query(
+      `SELECT a.*,
+              (SELECT COUNT(*) FROM comentarios c WHERE c.alerta_id = a.id)::int AS total_comentarios
+       FROM alertas a
+       ORDER BY a.fecha DESC`
+    );
     res.json({ exito: true, alertas: resultado.rows });
   } catch (error) {
     console.error(error);
@@ -144,10 +149,15 @@ app.post('/alertas', async (req, res) => {
   }
 });
 
-// Ruta para agregar o actualizar la descripción y/o la foto de una alerta
+// Ruta para agregar o actualizar la descripción y/o la foto de una alerta.
+// Solo puede hacerlo quien creó la alerta.
 app.put('/alertas/:id', async (req, res) => {
   const { id } = req.params;
-  const { mensaje, foto } = req.body;
+  const { mensaje, foto, creado_por } = req.body;
+
+  if (!creado_por) {
+    return res.status(400).json({ exito: false, mensaje: 'Falta el usuario que modifica la alerta' });
+  }
 
   const tieneMensaje = typeof mensaje === 'string' && mensaje.trim() !== '';
   const tieneFoto = typeof foto === 'string' && foto !== '';
@@ -161,16 +171,114 @@ app.put('/alertas/:id', async (req, res) => {
       `UPDATE alertas
        SET mensaje = COALESCE($1, mensaje),
            foto = COALESCE($2, foto)
-       WHERE id = $3
+       WHERE id = $3 AND creado_por = $4
        RETURNING id, tipo, mensaje, latitud, longitud, creado_por, fecha`,
-      [tieneMensaje ? mensaje.trim() : null, tieneFoto ? foto : null, id]
+      [tieneMensaje ? mensaje.trim() : null, tieneFoto ? foto : null, id, creado_por]
     );
 
     if (resultado.rows.length === 0) {
-      return res.status(404).json({ exito: false, mensaje: 'Alerta no encontrada' });
+      return res.status(403).json({ exito: false, mensaje: 'Solo quien creó la alerta puede modificarla' });
     }
 
     res.json({ exito: true, alerta: resultado.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ exito: false, mensaje: 'Error en el servidor' });
+  }
+});
+
+// Ruta para obtener los comentarios de una alerta
+app.get('/alertas/:id/comentarios', async (req, res) => {
+  const alertaId = parseInt(req.params.id, 10);
+  const correo = req.query.correo || '';
+
+  if (Number.isNaN(alertaId)) {
+    return res.status(400).json({ exito: false, mensaje: 'Alerta inválida' });
+  }
+
+  try {
+    const resultado = await pool.query(
+      `SELECT c.id,
+              c.texto,
+              c.fecha,
+              COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), ''), 'Vecino') AS nombre,
+              (c.autor = $2) AS es_mio
+       FROM comentarios c
+       LEFT JOIN usuarios u ON u.correo = c.autor
+       WHERE c.alerta_id = $1
+       ORDER BY c.fecha ASC`,
+      [alertaId, correo]
+    );
+    res.json({ exito: true, comentarios: resultado.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ exito: false, mensaje: 'Error en el servidor' });
+  }
+});
+
+// Ruta para agregar un comentario a una alerta
+app.post('/alertas/:id/comentarios', async (req, res) => {
+  const alertaId = parseInt(req.params.id, 10);
+  const { correo, texto } = req.body;
+  const contenido = typeof texto === 'string' ? texto.trim() : '';
+
+  if (Number.isNaN(alertaId)) {
+    return res.status(400).json({ exito: false, mensaje: 'Alerta inválida' });
+  }
+  if (!correo) {
+    return res.status(400).json({ exito: false, mensaje: 'Falta el usuario' });
+  }
+  if (contenido === '') {
+    return res.status(400).json({ exito: false, mensaje: 'El comentario no puede estar vacío' });
+  }
+  if (contenido.length > 300) {
+    return res.status(400).json({ exito: false, mensaje: 'El comentario es muy largo (máximo 300 caracteres)' });
+  }
+
+  try {
+    const usuario = await pool.query('SELECT id FROM usuarios WHERE correo = $1', [correo]);
+    if (usuario.rows.length === 0) {
+      return res.status(401).json({ exito: false, mensaje: 'Usuario no válido' });
+    }
+
+    const alerta = await pool.query('SELECT id FROM alertas WHERE id = $1', [alertaId]);
+    if (alerta.rows.length === 0) {
+      return res.status(404).json({ exito: false, mensaje: 'Alerta no encontrada' });
+    }
+
+    const resultado = await pool.query(
+      'INSERT INTO comentarios (alerta_id, autor, texto) VALUES ($1, $2, $3) RETURNING id',
+      [alertaId, correo, contenido]
+    );
+
+    res.json({ exito: true, id: resultado.rows[0].id });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ exito: false, mensaje: 'Error en el servidor' });
+  }
+});
+
+// Ruta para borrar un comentario (solo su autor)
+app.delete('/alertas/:id/comentarios/:comentarioId', async (req, res) => {
+  const alertaId = parseInt(req.params.id, 10);
+  const comentarioId = parseInt(req.params.comentarioId, 10);
+  const correo = req.query.correo || '';
+
+  if (Number.isNaN(alertaId) || Number.isNaN(comentarioId)) {
+    return res.status(400).json({ exito: false, mensaje: 'Datos inválidos' });
+  }
+
+  try {
+    const resultado = await pool.query(
+      'DELETE FROM comentarios WHERE id = $1 AND alerta_id = $2 AND autor = $3 RETURNING id',
+      [comentarioId, alertaId, correo]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(403).json({ exito: false, mensaje: 'Solo puedes borrar tus propios comentarios' });
+    }
+
+    res.json({ exito: true });
   } catch (error) {
     console.error(error);
     res.status(500).json({ exito: false, mensaje: 'Error en el servidor' });
