@@ -96,6 +96,10 @@ class _AlertasScreenState extends State<AlertasScreen> {
     return foto != null && foto.toString().isNotEmpty;
   }
 
+  bool _esPanico(dynamic alerta) {
+    return alerta['tipo']?.toString() == 'Botón de pánico';
+  }
+
   Widget _fotoAlerta(String fotoBase64) {
     try {
       final bytes = base64Decode(fotoBase64);
@@ -158,15 +162,21 @@ class _AlertasScreenState extends State<AlertasScreen> {
                       itemCount: _alertas.length,
                       itemBuilder: (context, index) {
                         final alerta = _alertas[index];
+                        final esPanico = _esPanico(alerta);
+
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(14),
+                            border: esPanico
+                                ? Border.all(color: Colors.red, width: 1.5)
+                                : null,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.06),
+                                color: (esPanico ? Colors.red : Colors.black)
+                                    .withValues(alpha: esPanico ? 0.12 : 0.06),
                                 blurRadius: 6,
                                 offset: const Offset(0, 2),
                               ),
@@ -175,17 +185,46 @@ class _AlertasScreenState extends State<AlertasScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (esPanico) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    '🚨 EMERGENCIA',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
                               Row(
                                 children: [
-                                  const Icon(Icons.report_problem,
-                                      color: Colors.orange),
+                                  Icon(
+                                    esPanico
+                                        ? Icons.warning_amber_rounded
+                                        : Icons.report_problem,
+                                    color: esPanico
+                                        ? Colors.red
+                                        : Colors.orange,
+                                  ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       alerta['tipo'] ?? 'Alerta',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: esPanico
+                                            ? Colors.red.shade800
+                                            : Colors.black,
+                                      ),
                                     ),
                                   ),
                                 ],
